@@ -15,6 +15,9 @@ from cluster_stability import cluster_validation
 from clustering_scores import cluster_indices
 from scipy.cluster.hierarchy import cut_tree
 from print_results import print_clusters_csv
+from ray.util.multiprocessing import Pool
+from ray.data import read_csv
+from functools import partial
 import pandas as pd
 import itertools
 import numpy as np
@@ -24,6 +27,38 @@ import argparse
 
 #np.random.seed(123)
 np.seterr(all='raise')
+
+def apply_main_algorithm(df_encoded, temporalPenalty, scoringDict, normalized, pdfFile, method, bootstrapSamples, args, gapPenalty):
+    #pairwise sequence alignment results
+    results = main_algorithm(df_encoded, gapPenalty, temporalPenalty, scoringDict, normalized)
+    
+    #reset indexes
+    df_encoded = df_encoded.reset_index()
+    
+    #convert similarity matrix into distance matrix
+    results['score'] = convert_to_distance_matrix(results['score'])
+    
+    #exception when all the scores are the same, in this case we continue with the next value of gap
+    if((results['score']== 0).all()):
+        #print('entrei')
+        return None
+    else:
+        #hierarchical clustering
+        pdfFileOpen = PdfPages(pdfFile)
+        partition = hierarchical_clustering(results['score'], method, gapPenalty, temporalPenalty, args.automatic, pdfFileOpen)
+
+        #validation
+        chosen = validation(bootstrapSamples, df_encoded, results, partition, method, args.minClusters,
+                            args.maxClusters + 1, args.automatic, pdfFileOpen, gapPenalty, temporalPenalty)
+        chosen_k = chosen[2]
+        df_avgs = chosen[0]
+        df_stds = chosen[1]
+        
+        chosen_results = df_avgs.loc[chosen_k]
+        chosen_results['gap'] = gapPenalty
+        #close pdf  
+        pdfFileOpen.close()
+        return chosen_results
 
 if __name__ == '__main__':
     
@@ -60,16 +95,16 @@ if __name__ == '__main__':
     #print(match)
     #print(mismatch)
     #initialize pre-defined scoring dictionary
-    s = {'11': match}
+    scoringDict = {'11': match}
     #get all combinations of letters of alphabet
     alphabet = string.ascii_uppercase
     comb = list(itertools.product(alphabet,repeat = 2))
     #construct the pre-defined scoring system
     for pairs in comb:
         if(pairs[0]==pairs[1]):
-            s[pairs[0]+pairs[1]] = match
+            scoringDict[pairs[0]+pairs[1]] = match
         else:
-            s[pairs[0]+pairs[1]] = mismatch
+            scoringDict[pairs[0]+pairs[1]] = mismatch
     
     #gap penalty for TNW Algorithm
     if(args.gap):
@@ -91,16 +126,16 @@ if __name__ == '__main__':
     
     #Temporal penalty for temporal penalty function of TNW Algorithm
     if(args.temporalPenaltyConstant):
-        T = args.temporalPenaltyConstant
+        temporalPenalty = args.temporalPenaltyConstant
     else:
-        T = 0.25
+        temporalPenalty = 0.25
     #print(T)
     
     #number of bootstrap samples M for validation step
     if(args.bootstrapSamples):
-        M = args.bootstrapSamples
+        bootstrapSamples = args.bootstrapSamples
     else:
-        M = 250
+        bootstrapSamples = 250
     #print(M)
     
     #mnimum number of clusters to analyse on validation step
@@ -124,7 +159,7 @@ if __name__ == '__main__':
     ###############################################################################
     #          READ TEMPORAL SEQUENCES
     ###############################################################################
-    df_encoded = pd.read_csv(args.filename,sep=',')
+    df_encoded = pd.read_csv(args.filename, sep=',')
     ################################################################################
     ##            SEQUENCE ALIGNMENT, HIERARCHICAL CLUSTERING & VALIDATION
     ################################################################################
@@ -132,45 +167,26 @@ if __name__ == '__main__':
     #pdf file to store dendrogram, table of averages and graph of standard deviation
     #when using AliClu in a non automated way
     if(args.automatic == 0):
-        pp = PdfPages('semi_automatic_analysis.pdf')
+        pdfFile = 'semi_automatic_analysis.pdf'
     else:
-        pp = PdfPages('full_analysis.pdf')
-    for gap in gap_values:
-        
-        print('Analysing with gap %.2f...'  %gap)
-        
-        #pairwise sequence alignment results
-        results = main_algorithm(df_encoded,gap,T,s,0)
-        
-        #reset indexes
-        df_encoded = df_encoded.reset_index()
-        
-        #convert similarity matrix into distance matrix
-        results['score'] = convert_to_distance_matrix(results['score'])
-        
-        #exception when all the scores are the same, in this case we continue with the next value of gap
-        if((results['score']== 0).all()):
-            #print('entrei')
-            continue
-        else:
-            #hierarchical clustering
-            Z = hierarchical_clustering(results['score'],method,gap,T,args.automatic,pp)
+        pdfFile = 'full_analysis.pdf'
 
-            #validation
-            chosen = validation(M,df_encoded,results,Z,method,min_K,max_K+1,args.automatic,pp,gap,T)
-            chosen_k = chosen[2]
-            df_avgs = chosen[0]
-            df_stds = chosen[1]
-            
-            chosen_results = df_avgs.loc[chosen_k]
-            chosen_results['gap'] = gap
-            concat_for_final_decision.append(chosen_results)
+    pool = Pool()
+    # for validatedResults in pool.starmap_async(apply_main_algorithm, [(df_encoded, temporalPenalty, 
+    #                                                            scoringDict, 0, pdfFile, method,
+    #                                                            bootstrapSamples, args, gap) for gap in gap_values]):
+    for validatedResults in pool.imap_unordered(partial(apply_main_algorithm, df_encoded, temporalPenalty, 
+                                                                scoringDict, 0, pdfFile, method,
+                                                                bootstrapSamples, args), [(gap) for gap in gap_values]):
+        if validatedResults is None:
+            continue
+        concat_for_final_decision.append(validatedResults)
+    pool.close()
+    pool.join()
     
     ############################################################################
     #       RESULTS
     ############################################################################
-    #close pdf  
-    pp.close()
     if(args.automatic==1):
         df_final_decision = pd.concat(concat_for_final_decision,axis=1).T
         final_k_results = final_decision(df_final_decision)
@@ -203,13 +219,13 @@ if __name__ == '__main__':
             final_gap = gap_values[0]
     
     #perform alignment with the chosen gap
-    results = main_algorithm(df_encoded,final_gap,T,s,0)
+    results = main_algorithm(df_encoded,final_gap,temporalPenalty,scoringDict,0)
     
     #convert similarity matrix into distance matrix
     results['score'] = convert_to_distance_matrix(results['score'])
     
     #hierarchical clustering
-    Z = hierarchical_clustering(results['score'],method,gap,T,-1,0)
+    Z = hierarchical_clustering(results['score'],method,final_gap,temporalPenalty,-1,0)
     
     #reset indexes
     df_encoded = df_encoded.reset_index()
@@ -220,10 +236,10 @@ if __name__ == '__main__':
     #obtain the final partitions
     partition_found = cluster_indices(c_assignments_found,df_encoded.index.tolist())
     partition_found.sort(key=len)
-    directory = method + '_gap_' + str(final_gap) + '_Tp_' + str(T) + '_clusters_' + str(k) + '/'
+    directory = method + '_gap_' + str(final_gap) + '_Tp_' + str(temporalPenalty) + '_clusters_' + str(k) + '/'
     #print the clusters on a directory in separated csv files
     print_clusters_csv(k,partition_found,df_encoded,directory)
 
     #CLUSTER VALIDATION AFTER FOUNDING K
-    cluster_validation(M,method,k,partition_found,df_encoded,results,final_gap,T)
+    cluster_validation(bootstrapSamples,method,k,partition_found,df_encoded,results,final_gap,temporalPenalty)
    

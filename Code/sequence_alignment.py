@@ -205,6 +205,7 @@ def alignment(traceback,rows,cols,seq1,seq2):
     # the aligned sequences and final score
     
 def main_algorithm(df_encoded,gap,T,s,normalized):
+    print('Analysing with gap %.2f...'  %gap)
     
     #get all the possible combinations between the patients to perform alignment
     patient_comb = list(itertools.combinations(df_encoded['id_patient'],2))
