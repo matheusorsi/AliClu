@@ -10,10 +10,10 @@ Created on Tue Jan 30 10:35:48 2018
 #The objective is to performe alignment between all pairwise elements of a dataframe, this 
 #dataframe comes with an id and the temporal sequence for each element.
 
+import traceback as tb
 import pandas as pd
 import numpy as np
 import itertools
-
 
 # Initialisation of the score matrix
 def score_initialisation(rows,cols,gap):
@@ -189,12 +189,12 @@ def alignment(traceback,rows,cols,seq1,seq2):
     #df_encoded :  a dataframe containing N elements and 2 columns, one for the id and other
     #for the temporal sequences ('id_patient' & 'aux_encode')
     
-    #gap: gap penalty used in the TNW algorithm
+    #gapPenalty: gap penalty used in the TNW algorithm
     
-    #T: #user-defined heuristic  and represents the maximum penalty that will be imposed on S(xi,yi) 
+    #temporalPenalty (T): #user-defined heuristic  and represents the maximum penalty that will be imposed on S(xi,yi) 
     #for temporal differences
     
-    #s: pre-defined scoring system
+    #scoringDict: pre-defined scoring system
     
     #normalized: variable that takes value 0 or 1, where 0 indicates there is no normalization of the scores
     # and 1 we normalize our scores dividing the scores by the number of aligned events
@@ -204,62 +204,64 @@ def alignment(traceback,rows,cols,seq1,seq2):
     #it presents the id of the elements being aligned, the correspodent original sequences, 
     # the aligned sequences and final score
     
-def main_algorithm(df_encoded,gap,T,s,normalized):
-    print('Analysing with gap %.2f...'  %gap)
-    
-    #get all the possible combinations between the patients to perform alignment
-    patient_comb = list(itertools.combinations(df_encoded['id_patient'],2))
-    
-    #set id_patient as index column it will be helpful for later manipulation of sequences
-    df_encoded.set_index('id_patient',inplace=True)
-    
-    results = pd.DataFrame(patient_comb,columns = ['patient1','patient2'])
-    list_sequences_aligned = []
-    list_scores = []
-    list_sequences = []
-    
-    #analyze every possible combination between patints
-    for patient_pair in patient_comb:
-        #get the sequences to be aligned
-        seq1_encoded = df_encoded.loc[patient_pair[0],'aux_encode']
-        seq2_encoded = df_encoded.loc[patient_pair[1],'aux_encode']
-    
-        list_sequences.append([seq1_encoded,seq2_encoded])
-         #split the sequences
-        aux1 = seq1_encoded.split(",")
-        aux2 = seq2_encoded.split(",")
+def main_algorithm(df_encoded, gapPenalty, temporalPenalty, scoringDict, normalized):
+    try:
+        #get all the possible combinations between the patients to perform alignment
+        patient_comb = list(itertools.combinations(df_encoded['id_patient'], 2))
+        
+        #set id_patient as index column it will be helpful for later manipulation of sequences
+        df_encoded.set_index('id_patient', inplace=True)
+        
+        results = pd.DataFrame(patient_comb,columns = ['patient1', 'patient2'])
+        list_sequences_aligned = []
+        list_scores = []
+        list_sequences = []
+        
+        #analyze every possible combination between patints
+        for patient_pair in patient_comb:
+            #get the sequences to be aligned
+            seq1_encoded = df_encoded.loc[patient_pair[0], 'aux_encode']
+            seq2_encoded = df_encoded.loc[patient_pair[1], 'aux_encode']
+        
+            list_sequences.append([seq1_encoded, seq2_encoded])
+            #split the sequences
+            aux1 = seq1_encoded.split(",")
+            aux2 = seq2_encoded.split(",")
 
-        seq1 = []
-        seq2 = []
+            seq1 = []
+            seq2 = []
+            
+            for seq in aux1:
+                seq1.append(seq.rsplit(".", 1))
         
-        for seq in aux1:
-            seq1.append(seq.rsplit(".",1))
-    
-        for seq in aux2:
-            seq2.append(seq.rsplit(".",1))
-        
-        cols=len(seq1)+1
-        rows=len(seq2)+1
-                
-        score = score_initialisation(rows,cols,gap)
-        traceback = traceback_initialisation(rows,cols)
-        TR = TR_initialisation(rows,cols,traceback,seq2)
-        TC = TC_initialisation(rows,cols,traceback,seq1)
-        
-        calculate_scores(score,traceback,rows,cols,seq1,seq2,TR,TC,gap,T,s)
-        sequences_aligned = alignment(traceback,rows,cols,seq1,seq2)
-        
-        list_sequences_aligned.append(sequences_aligned)
-        
-        if(normalized == 1):
-            #normalization of scores
-            list_scores.append((score[rows-1][cols-1])/sequences_aligned[2])
-        else:
-            list_scores.append(score[rows-1][cols-1])
-        
-    results['sequences'] = pd.Series(list_sequences)
-    results['sequences_aligned'] = pd.Series(list_sequences_aligned)
-    results['score'] = pd.Series(list_scores)
-    return results
+            for seq in aux2:
+                seq2.append(seq.rsplit(".", 1))
+            
+            cols = len(seq1) + 1
+            rows = len(seq2) + 1
+                    
+            score = score_initialisation(rows, cols, gapPenalty)
+            traceback = traceback_initialisation(rows, cols)
+            TR = TR_initialisation(rows, cols, traceback, seq2)
+            TC = TC_initialisation(rows, cols, traceback, seq1)
+            
+            calculate_scores(score, traceback, rows, cols, seq1, seq2, TR, TC, gapPenalty, temporalPenalty, scoringDict)
+            sequences_aligned = alignment(traceback, rows, cols, seq1, seq2)
+            
+            list_sequences_aligned.append(sequences_aligned)
+            
+            if(normalized == 1):
+                #normalization of scores
+                list_scores.append((score[rows-1][cols-1])/sequences_aligned[2])
+            else:
+                list_scores.append(score[rows-1][cols-1])
+            
+        results['sequences'] = pd.Series(list_sequences)
+        results['sequences_aligned'] = pd.Series(list_sequences_aligned)
+        results['score'] = pd.Series(list_scores)
+        return results
+    except:
+        print(tb.format_exc(), flush=True)
+        #k=input("press close to exit") 
 
     

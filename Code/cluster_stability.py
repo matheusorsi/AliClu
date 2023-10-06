@@ -105,5 +105,6 @@ def cluster_validation(M,method,k,partition_found,df_encoded,results,gap,Tp):
     the_table.set_fontsize(8)
     the_table.scale(1.1, 1.1)
     pp.savefig(fig)
+    plt.close(fig)
     pp.close()
     

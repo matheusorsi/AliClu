@@ -7,17 +7,16 @@ Created on Tue May 29 17:23:23 2018
 
 # Implementation of AliClu
 
-from matplotlib.backends.backend_pdf import PdfPages
+from functools import partial
+from ray.util.multiprocessing import Pool
 from sequence_alignment import main_algorithm
 from clustering import convert_to_distance_matrix, hierarchical_clustering
 from hierarchical_validation import validation, final_decision
 from cluster_stability import cluster_validation
 from clustering_scores import cluster_indices
 from scipy.cluster.hierarchy import cut_tree
-from print_results import print_clusters_csv
-from ray.util.multiprocessing import Pool
-from ray.data import read_csv
-from functools import partial
+from print_results import print_clusters_csv, print_pdf_images, print_full_analysis
+import traceback as tb
 import pandas as pd
 import itertools
 import numpy as np
@@ -28,218 +27,225 @@ import argparse
 #np.random.seed(123)
 np.seterr(all='raise')
 
-def apply_main_algorithm(df_encoded, temporalPenalty, scoringDict, normalized, pdfFile, method, bootstrapSamples, args, gapPenalty):
-    #pairwise sequence alignment results
-    results = main_algorithm(df_encoded, gapPenalty, temporalPenalty, scoringDict, normalized)
-    
-    #reset indexes
-    df_encoded = df_encoded.reset_index()
-    
-    #convert similarity matrix into distance matrix
-    results['score'] = convert_to_distance_matrix(results['score'])
-    
-    #exception when all the scores are the same, in this case we continue with the next value of gap
-    if((results['score']== 0).all()):
-        #print('entrei')
-        return None
-    else:
-        #hierarchical clustering
-        pdfFileOpen = PdfPages(pdfFile)
-        partition = hierarchical_clustering(results['score'], method, gapPenalty, temporalPenalty, args.automatic, pdfFileOpen)
+def apply_main_algorithm(df_encoded, temporalPenalty, scoringDict, normalized, method, bootstrapSamples, args, gapPenalty):
+    try:
+        print('Analysing with gap %.2f...'  %gapPenalty, flush=True)
 
-        #validation
-        chosen = validation(bootstrapSamples, df_encoded, results, partition, method, args.minClusters,
-                            args.maxClusters + 1, args.automatic, pdfFileOpen, gapPenalty, temporalPenalty)
-        chosen_k = chosen[2]
-        df_avgs = chosen[0]
-        df_stds = chosen[1]
+        #pairwise sequence alignment results
+        results = main_algorithm(df_encoded, gapPenalty, temporalPenalty, scoringDict, normalized)
+
+        #reset indexes
+        df_encoded = df_encoded.reset_index()
         
-        chosen_results = df_avgs.loc[chosen_k]
-        chosen_results['gap'] = gapPenalty
-        #close pdf  
-        pdfFileOpen.close()
-        return chosen_results
+        #convert similarity matrix into distance matrix
+        results['score'] = convert_to_distance_matrix(results['score'])
+        
+        #exception when all the scores are the same, in this case we continue with the next value of gap
+        if((results['score']== 0).all()):
+            #print('entrei')
+            return None
+        else:
+            #hierarchical clustering
+            partition, figurePartition = hierarchical_clustering(results['score'], method, gapPenalty, temporalPenalty)
+
+            #validation
+            chosen = validation(bootstrapSamples, df_encoded, results, partition, method, args.minClusters,
+                                args.maxClusters + 1)
+            chosen_k = chosen[2]
+            df_avgs = chosen[0]
+            df_stds = chosen[1]
+            
+            print_pdf_images(df_avgs, df_stds, gapPenalty, temporalPenalty, method, figurePartition)        
+            
+            chosen_results = df_avgs.loc[chosen_k]
+            chosen_results['gap'] = gapPenalty
+
+            return chosen_results
+    except:
+        print(tb.format_exc(), flush=True)
+        #k=input("press close to exit") 
 
 if __name__ == '__main__':
-    
-    parser = argparse.ArgumentParser(description='AliClu')
-    #positional arguments - filename, maximum number of clusters, automatic or not 
-    parser.add_argument("filename",help='Input CSV file with temporal sequences for each patient')
-    parser.add_argument("minClusters",type=int,help='Minimum number of clusters to analyse on validation step')
-    parser.add_argument("maxClusters",type=int,help='Maximum number of clusters to analyse on validation step')
-    parser.add_argument('automatic',type=int,help='1 to run AliClu automatically, 0 otherwise')
-    #optional arguments - scoring system, gap penalty, temporal penalty constant, number of 
-    #bootstrap samples, distance metric for hierarchical clustering
-    parser.add_argument('-SS','--ScoringSystem',metavar='',help='Pre-defined scoring system')
-    parser.add_argument('-g','--gap',metavar='',help='Gap penalty')
-    parser.add_argument('-tp','--temporalPenaltyConstant',type=float,metavar='',help='Temporal penalty constant')
-    parser.add_argument('-M','--bootstrapSamples',type=int,metavar='',help='Number of bootstrap samples')
-    parser.add_argument('-d','--distanceMetric',metavar='',help='Distance metric for agglomerative clustering')
-    args = parser.parse_args()
-    
-    ###############################################################################
-    #               PARAMETERS
-    ###############################################################################
-    #pre-defined scoring system for TNW Algorithm
-    if(args.ScoringSystem):
-        ss_string_values = args.ScoringSystem.split('[')[1].split(']')[0].split(' ')
-        if(len(ss_string_values)==2):
-            match = float(ss_string_values[0])
-            mismatch = float(ss_string_values[1])
-        else:
-            parser.error("Scoring System not in the correct format")
-    else:           
-        match=1.
-        mismatch=-1.1
+    try:
+        parser = argparse.ArgumentParser(description='AliClu')
+        #positional arguments - filename, maximum number of clusters, automatic or not 
+        parser.add_argument("filename", help='Input CSV file with temporal sequences for each patient')
+        parser.add_argument("minClusters", type=int, help='Minimum number of clusters to analyse on validation step')
+        parser.add_argument("maxClusters", type=int, help='Maximum number of clusters to analyse on validation step')
+        parser.add_argument('automatic', type=int, help='1 to run AliClu automatically, 0 otherwise')
+        #optional arguments - scoring system, gap penalty, temporal penalty constant, number of 
+        #bootstrap samples, distance metric for hierarchical clustering
+        parser.add_argument('-SS', '--ScoringSystem', metavar='', help='Pre-defined scoring system')
+        parser.add_argument('-g', '--gap',metavar='', help='Gap penalty')
+        parser.add_argument('-tp', '--temporalPenaltyConstant', type=float, metavar='', help='Temporal penalty constant')
+        parser.add_argument('-M', '--bootstrapSamples', type=int, metavar='', help='Number of bootstrap samples')
+        parser.add_argument('-d', '--distanceMetric', metavar='', help='Distance metric for agglomerative clustering')
+        args = parser.parse_args()
         
-    #print(match)
-    #print(mismatch)
-    #initialize pre-defined scoring dictionary
-    scoringDict = {'11': match}
-    #get all combinations of letters of alphabet
-    alphabet = string.ascii_uppercase
-    comb = list(itertools.product(alphabet,repeat = 2))
-    #construct the pre-defined scoring system
-    for pairs in comb:
-        if(pairs[0]==pairs[1]):
-            scoringDict[pairs[0]+pairs[1]] = match
+        ###############################################################################
+        #               PARAMETERS
+        ###############################################################################
+        #pre-defined scoring system for TNW Algorithm
+        if(args.ScoringSystem):
+            ss_string_values = args.ScoringSystem.split('[')[1].split(']')[0].split(' ')
+            if(len(ss_string_values) == 2):
+                match = float(ss_string_values[0])
+                mismatch = float(ss_string_values[1])
+            else:
+                parser.error("Scoring System not in the correct format")
+        else:           
+            match = 1.
+            mismatch = -1.1
+            
+        #print(match)
+        #print(mismatch)
+        #initialize pre-defined scoring dictionary
+        scoringDict = {'11': match}
+        #get all combinations of letters of alphabet
+        alphabet = string.ascii_uppercase
+        comb = list(itertools.product(alphabet,repeat = 2))
+        #construct the pre-defined scoring system
+        for pairs in comb:
+            if(pairs[0] == pairs[1]):
+                scoringDict[pairs[0] + pairs[1]] = match
+            else:
+                scoringDict[pairs[0] + pairs[1]] = mismatch
+        
+        #gap penalty for TNW Algorithm
+        if(args.gap):
+            gap_string_values = args.gap.split('[')[1].split(']')[0].split(' ')
+            if(len(gap_string_values) == 1):
+                gap_values = [float(gap_string_values[0])]
+            elif(len(gap_string_values) == 3):
+                min_gap = float(gap_string_values[0])    
+                max_gap = float(gap_string_values[1])
+                step_gap = float(gap_string_values[2])
+                #gap_values = np.arange(min_gap,max_gap+step_gap,step_gap)
+                num = int(round((max_gap-min_gap)/(step_gap) + 1,0))
+                gap_values = np.linspace(min_gap, max_gap, num)
+            else:
+                parser.error("Gap values not in the correct format")
         else:
-            scoringDict[pairs[0]+pairs[1]] = mismatch
-    
-    #gap penalty for TNW Algorithm
-    if(args.gap):
-        gap_string_values = args.gap.split('[')[1].split(']')[0].split(' ')
-        if(len(gap_string_values)==1):
-            gap_values = [float(gap_string_values[0])]
-        elif(len(gap_string_values)==3):
-            min_gap = float(gap_string_values[0])    
-            max_gap = float(gap_string_values[1])
-            step_gap = float(gap_string_values[2])
-            #gap_values = np.arange(min_gap,max_gap+step_gap,step_gap)
-            num = int(round((max_gap-min_gap)/(step_gap) + 1,0))
-            gap_values = np.linspace(min_gap,max_gap,num)
+            gap_values = np.linspace(-1, 1, 21)
+        #print(gap_values)
+        
+        #Temporal penalty for temporal penalty function of TNW Algorithm
+        if(args.temporalPenaltyConstant):
+            temporalPenalty = args.temporalPenaltyConstant
         else:
-            parser.error("Gap values not in the correct format")
-    else:
-        gap_values = np.linspace(-1,1,21)
-    #print(gap_values)
-    
-    #Temporal penalty for temporal penalty function of TNW Algorithm
-    if(args.temporalPenaltyConstant):
-        temporalPenalty = args.temporalPenaltyConstant
-    else:
-        temporalPenalty = 0.25
-    #print(T)
-    
-    #number of bootstrap samples M for validation step
-    if(args.bootstrapSamples):
-        bootstrapSamples = args.bootstrapSamples
-    else:
-        bootstrapSamples = 250
-    #print(M)
-    
-    #mnimum number of clusters to analyse on validation step
-    min_K = args.minClusters 
-    #print(min_K)
-    #maximum number of clusters to analyse on validation step
-    max_K = args.maxClusters
-    #print(max_K)
-    
-    #distance metric used in hierarchical clustering
-    if(args.distanceMetric):
-        allowed_methods = ['single','complete','average','centroid','ward']
-        if(args.distanceMetric in allowed_methods):
-            method = args.distanceMetric
+            temporalPenalty = 0.25
+        #print(T)
+        
+        #number of bootstrap samples M for validation step
+        if(args.bootstrapSamples):
+            bootstrapSamples = args.bootstrapSamples
         else:
-            parser.error("Not one of the 5 distance metrics used in AliClu")
-    else:
-        method = 'ward'
-    #print(method)
-    
-    ###############################################################################
-    #          READ TEMPORAL SEQUENCES
-    ###############################################################################
-    df_encoded = pd.read_csv(args.filename, sep=',')
-    ################################################################################
-    ##            SEQUENCE ALIGNMENT, HIERARCHICAL CLUSTERING & VALIDATION
-    ################################################################################
-    concat_for_final_decision = []
-    #pdf file to store dendrogram, table of averages and graph of standard deviation
-    #when using AliClu in a non automated way
-    if(args.automatic == 0):
-        pdfFile = 'semi_automatic_analysis.pdf'
-    else:
-        pdfFile = 'full_analysis.pdf'
+            bootstrapSamples = 250
+        #print(M)
+        
+        #mnimum number of clusters to analyse on validation step
+        min_K = args.minClusters 
+        #print(min_K)
+        #maximum number of clusters to analyse on validation step
+        max_K = args.maxClusters
+        #print(max_K)
+        
+        #distance metric used in hierarchical clustering
+        if(args.distanceMetric):
+            allowed_methods = ['single', 'complete', 'average', 'centroid', 'ward']
+            if(args.distanceMetric in allowed_methods):
+                method = args.distanceMetric
+            else:
+                parser.error("Not one of the 5 distance metrics used in AliClu")
+        else:
+            method = 'ward'
+        #print(method)
+        
+        ###############################################################################
+        #          READ TEMPORAL SEQUENCES
+        ###############################################################################
+        df_encoded = pd.read_csv(args.filename, sep=',')
+        
+        ################################################################################
+        ##            SEQUENCE ALIGNMENT, HIERARCHICAL CLUSTERING & VALIDATION
+        ################################################################################
+        concat_for_final_decision = []
+        #pdf file to store dendrogram, table of averages and graph of standard deviation
+        #when using AliClu in a non automated way
+        if(args.automatic == 0):
+            pdfFileName = 'semi_automatic_analysis.pdf'
+        else:
+            pdfFileName = 'full_analysis.pdf'
 
-    pool = Pool()
-    # for validatedResults in pool.starmap_async(apply_main_algorithm, [(df_encoded, temporalPenalty, 
-    #                                                            scoringDict, 0, pdfFile, method,
-    #                                                            bootstrapSamples, args, gap) for gap in gap_values]):
-    for validatedResults in pool.imap_unordered(partial(apply_main_algorithm, df_encoded, temporalPenalty, 
-                                                                scoringDict, 0, pdfFile, method,
-                                                                bootstrapSamples, args), [(gap) for gap in gap_values]):
-        if validatedResults is None:
-            continue
-        concat_for_final_decision.append(validatedResults)
-    pool.close()
-    pool.join()
-    
-    ############################################################################
-    #       RESULTS
-    ############################################################################
-    if(args.automatic==1):
-        df_final_decision = pd.concat(concat_for_final_decision,axis=1).T
-        final_k_results = final_decision(df_final_decision)
-        print('Chosen gap penalty: ',final_k_results['gap'])
-        print('\n')
-        print('Chosen number of clusters: ',final_k_results['k'])
-        print('\n')
-        final_gap = final_k_results['gap']
-        k = int(final_k_results['k'])
-    elif(args.automatic==0):
-        #close pdf  
-        #pp.close()
-        #USER INPUTS THE FINAL NUMBER OF CLUSTERS
-        k = input("Please enter the final number of clusters: ")
-        k = float(k)
-        while(k>max_K or k<min_K):
-            k = input("Please enter one of the analysed number of clusters: ")
+        pool = Pool()  
+        for validatedAlignmentResults in pool.imap_unordered(partial(apply_main_algorithm, df_encoded, temporalPenalty, 
+                                                                    scoringDict, 0, method, bootstrapSamples, args), 
+                                                                    [gap for gap in gap_values]):
+            if validatedAlignmentResults is None:
+                continue
+            concat_for_final_decision.append(validatedAlignmentResults)
+        pool.close()
+        pool.join()
+        pool.terminate()
+
+        print_full_analysis(pdfFileName, gap_values)
+        
+        ############################################################################
+        #       RESULTS
+        ############################################################################
+        if(args.automatic == 1):                
+            df_final_decision = pd.concat(concat_for_final_decision, axis=1).T
+            final_k_results = final_decision(df_final_decision)
+            print('Chosen gap penalty: ', final_k_results['gap'])
+            print('\n')
+            print('Chosen number of clusters: ', final_k_results['k'])
+            print('\n')
+            final_gap = final_k_results['gap']
+            k = int(final_k_results['k'])
+        elif(args.automatic == 0):
+            #USER INPUTS THE FINAL NUMBER OF CLUSTERS
+            k = input("Please enter the final number of clusters: ")
             k = float(k)
-        print("Final number of clusters: " + str(k))
-        k=int(k)
-        #USER INPUTS THE CHOSEN GAP PENALTY
-        if(len(gap_values)>1):
-            final_gap = input("Please enter the chosen gap penalty: ")
-            final_gap = float(final_gap)
-            while(final_gap not in gap_values):    
-                final_gap = input("Please enter one of the analysed gap penalties: ")
+            while(k > max_K or k < min_K):
+                k = input("Please enter one of the analysed number of clusters: ")
+                k = float(k)
+            print("Final number of clusters: " + str(k))
+            k = int(k)
+            #USER INPUTS THE CHOSEN GAP PENALTY
+            if(len(gap_values) > 1):
+                final_gap = input("Please enter the chosen gap penalty: ")
                 final_gap = float(final_gap)
-            print("Chosen gap penalty: " + str(final_gap))
-        else:
-            final_gap = gap_values[0]
-    
-    #perform alignment with the chosen gap
-    results = main_algorithm(df_encoded,final_gap,temporalPenalty,scoringDict,0)
-    
-    #convert similarity matrix into distance matrix
-    results['score'] = convert_to_distance_matrix(results['score'])
-    
-    #hierarchical clustering
-    Z = hierarchical_clustering(results['score'],method,final_gap,temporalPenalty,-1,0)
-    
-    #reset indexes
-    df_encoded = df_encoded.reset_index()
-    
-    #PRINT CLUSTERS
-    #cut the final dendrogram
-    c_assignments_found = cut_tree(Z,k)
-    #obtain the final partitions
-    partition_found = cluster_indices(c_assignments_found,df_encoded.index.tolist())
-    partition_found.sort(key=len)
-    directory = method + '_gap_' + str(final_gap) + '_Tp_' + str(temporalPenalty) + '_clusters_' + str(k) + '/'
-    #print the clusters on a directory in separated csv files
-    print_clusters_csv(k,partition_found,df_encoded,directory)
+                while(final_gap not in gap_values):    
+                    final_gap = input("Please enter one of the analysed gap penalties: ")
+                    final_gap = float(final_gap)
+                print("Chosen gap penalty: " + str(final_gap))
+            else:
+                final_gap = gap_values[0]
+        
+        #perform alignment with the chosen gap
+        results = main_algorithm(df_encoded, final_gap, temporalPenalty, scoringDict, 0)
+        
+        #convert similarity matrix into distance matrix
+        results['score'] = convert_to_distance_matrix(results['score'])
+        
+        #hierarchical clustering
+        complete_tree, fig = hierarchical_clustering(results['score'], method, final_gap, temporalPenalty)
+        
+        #reset indexes
+        df_encoded = df_encoded.reset_index()
+        
+        #PRINT CLUSTERS
+        #cut the final dendrogram
+        c_assignments_found = cut_tree(complete_tree, k)
+        #obtain the final partitions
+        partition_found = cluster_indices(c_assignments_found, df_encoded.index.tolist())
+        partition_found.sort(key = len)
+        directory = method + '_gap_' + str(final_gap) + '_Tp_' + str(temporalPenalty) + '_clusters_' + str(k) + '/'
+        #print the clusters on a directory in separated csv files
+        print_clusters_csv(k, partition_found, df_encoded, directory)
 
-    #CLUSTER VALIDATION AFTER FOUNDING K
-    cluster_validation(bootstrapSamples,method,k,partition_found,df_encoded,results,final_gap,temporalPenalty)
-   
+        #CLUSTER VALIDATION AFTER FOUNDING K
+        cluster_validation(bootstrapSamples, method, k, partition_found, df_encoded, results, final_gap, temporalPenalty)
+    except:
+        print(tb.format_exc(), flush=True)
+        #k=input("press close to exit") 

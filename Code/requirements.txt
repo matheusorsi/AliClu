@@ -6,3 +6,4 @@ scipy
 fastcluster
 statistics
 ray
+fitz
