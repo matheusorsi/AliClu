@@ -9,7 +9,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib import pyplot as plt
 from fastcluster import linkage
 from scipy.cluster.hierarchy import cut_tree
-from clustering_scores import cluster_indices,cluster_validation_indexes
+from clustering_scores import sequence_indices_in_clusters,cluster_validation_indexes
 import numpy as np
 import pandas as pd
 from statistics import mean, stdev, median
@@ -47,7 +47,7 @@ def cluster_validation(M,method,k,partition_found,df_encoded,results,gap,Tp):
         Z_bootstrap = linkage(results_bootstrap['score'],method)
         
         c_assignments_bootstrap = cut_tree(Z_bootstrap,k)
-        partition_bootstrap = cluster_indices(c_assignments_bootstrap,idx)
+        partition_bootstrap = sequence_indices_in_clusters(c_assignments_bootstrap,idx)
         
         for k_i in range(1,k+1):
             aux_jaccard = []

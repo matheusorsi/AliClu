@@ -6,4 +6,5 @@ scipy
 fastcluster
 statistics
 ray
-fitz
+pymupdf
+rpy2

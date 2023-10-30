@@ -10,11 +10,32 @@ def generate_dataset(n_sequences, n_dataset, filename="time_experiment.csv"):
     #initialize list that will contain the auxiliary dataframes to be concataneted
     concat = [] 
 
-    if n_dataset > 3:
+    if n_dataset > 3 and n_dataset < 7:
         return n_events_datasets(n_sequences, n_dataset, filename)
+    
 
     #maximum number of different events
     n_events = 4
+
+    #Neutral dataset - every sequence is generated using the same rate
+    if n_dataset == 7:
+        rate = 300
+
+        # initial distribution for the states
+        iDistribution = [0]*n_events
+        iDistribution[0] = 1 
+
+        genMatrix = np.zeros((n_events, n_events)) # generator matrix
+        genMatrix[0][0:2] = [-rate, rate]
+        
+        df_aux = ctmc_sequences(n_events, iDistribution, genMatrix, n_sequences) # temporal sequences
+        concat.append(df_aux)
+        df_encoded = pd.concat(concat, ignore_index = True)
+        #numerate patients from 0 to N-1, where N is the number patients
+        df_encoded['id_patient'] = df_encoded.index.tolist()
+        df_encoded.to_csv(filename, index=False)
+        return df_encoded
+
 
     ###############################################################
     #CLUSTER 1 and 2 - A->B
@@ -22,7 +43,7 @@ def generate_dataset(n_sequences, n_dataset, filename="time_experiment.csv"):
     
     clusters = 2
     #rates of state changes for the clusters
-    rates = [1000, 10]
+    rates = [90, 270]
     
     #generate sequences
     for i in range(0, clusters):

@@ -10,7 +10,7 @@ Created on Tue Jan 30 10:56:45 2018
 import traceback as tb
 from scipy.cluster.hierarchy import cut_tree
 from fastcluster import linkage
-from clustering_scores import cluster_indices, cluster_external_index
+from clustering_scores import sequence_indices_in_clusters, cluster_external_index, cluster_internal_indices
 from statistics import mean, stdev
 import pandas as pd
 import numpy as np
@@ -42,7 +42,11 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
             dicio_statistics[k]['FM'] = []
             dicio_statistics[k]['jaccard'] = []
             dicio_statistics[k]['adjusted_wallace'] = []
-
+            dicio_statistics[k]['mcClain_new'] = []
+            dicio_statistics[k]['mcClain_old'] = []
+            dicio_statistics[k]['c_index'] = []
+            dicio_statistics[k]['silhouette'] = []
+            dicio_statistics[k]['dunn'] = []
 
         #for each bootstrap sample
         for i in range(bootstrapSamples):
@@ -62,9 +66,9 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
                 cluster_assignments_original = cut_tree(main_partition, k)
                 cluster_assignments_bootstrap = cut_tree(partitionBootstrap, k)
                 #list of clusters for the clustering result with the original data
-                cluster_indices_original = cluster_indices(cluster_assignments_original,df_encoded.index.tolist())
+                cluster_indices_original = sequence_indices_in_clusters(cluster_assignments_original,df_encoded.index.tolist())
                 #list of clusters for the clustering result with the bootstrap sample
-                cluster_indices_bootstrap = cluster_indices(cluster_assignments_bootstrap,idx)
+                cluster_indices_bootstrap = sequence_indices_in_clusters(cluster_assignments_bootstrap,idx)
 
                 #compute 4 different cluster external indexes between the partitions
                 computed_indexes = cluster_external_index(cluster_indices_original, cluster_indices_bootstrap)
@@ -75,6 +79,13 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
                 dicio_statistics[k]['jaccard'].append(computed_indexes[3])
                 dicio_statistics[k]['adjusted_wallace'].append(computed_indexes[4])
 
+                #print('k', k)
+                computed_indexes = cluster_internal_indices(cluster_indices_bootstrap, results_bootstrap[['patient1', 'patient2','score']], df_encoded.loc[idx,'id_patient'])
+                dicio_statistics[k]['mcClain_new'].append(computed_indexes[0])
+                dicio_statistics[k]['mcClain_old'].append(computed_indexes[1])
+                dicio_statistics[k]['c_index'].append(computed_indexes[2])
+                dicio_statistics[k]['silhouette'].append(computed_indexes[3])
+                dicio_statistics[k]['dunn'].append(computed_indexes[4])
 
         ###########################################################################
         #  DECISION ON THE NUMBER OF CLUSTERS
@@ -85,9 +96,15 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
         ###########################################################################
 
         #dataframe that stores the clustering indices averages for each k
-        df_avgs = pd.DataFrame(index = range(min_K, max_K), columns = ['k','Rand','Adjusted Rand','Fowlkes and Mallows','Jaccard','Adjusted Wallace','k_score_avg'], dtype='float')
+        df_avgs = pd.DataFrame(index = range(min_K, max_K), columns = ['k','Rand','Adjusted Rand','Fowlkes and Mallows',
+                                                                       'Jaccard','Adjusted Wallace', 'McClain (NbClust)',
+                                                                       'McClain (1975)', 'C-index', 'Silhouette',
+                                                                       'Dunn','k_score_avg'], dtype='float')
         #dataframe that stores the AR and AW indices standard deviations for each k
-        df_stds = pd.DataFrame(index = range(min_K, max_K), columns = ['k','Rand','Adjusted Rand','Fowlkes and Mallows','Jaccard','Adjusted Wallace'], dtype = 'float')
+        df_stds = pd.DataFrame(index = range(min_K, max_K), columns = ['k','Rand','Adjusted Rand','Fowlkes and Mallows',
+                                                                       'Jaccard','Adjusted Wallace', 'McClain (NbClust)',
+                                                                       'McClain (1975)', 'C-index', 'Silhouette',
+                                                                       'Dunn'], dtype = 'float')
 
         #computing the means and standard deviations
         for k in range(min_K, max_K):
@@ -97,6 +114,11 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
             df_avgs.loc[k]['Fowlkes and Mallows']= mean(dicio_statistics[k]['FM'])
             df_avgs.loc[k]['Jaccard']= mean(dicio_statistics[k]['jaccard'])
             df_avgs.loc[k]['Adjusted Wallace'] = mean(dicio_statistics[k]['adjusted_wallace'])
+            df_avgs.loc[k]['McClain (NbClust)'] = mean(dicio_statistics[k]['mcClain_new'])
+            df_avgs.loc[k]['McClain (1975)'] = mean(dicio_statistics[k]['mcClain_old'])
+            df_avgs.loc[k]['C-index'] = mean(dicio_statistics[k]['c_index'])
+            df_avgs.loc[k]['Silhouette'] = mean(dicio_statistics[k]['silhouette'])
+            df_avgs.loc[k]['Dunn'] = mean(dicio_statistics[k]['dunn'])
             df_avgs.loc[k]['k_score_avg'] = 0
 
             df_stds.loc[k]['k'] = k
@@ -105,6 +127,11 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
             df_stds.loc[k]['Fowlkes and Mallows']  =stdev(dicio_statistics[k]['FM'])
             df_stds.loc[k]['Jaccard'] = stdev(dicio_statistics[k]['jaccard'])
             df_stds.loc[k]['Adjusted Wallace'] = stdev(dicio_statistics[k]['adjusted_wallace'])
+            df_stds.loc[k]['McClain (NbClust)'] = stdev(dicio_statistics[k]['mcClain_new'])
+            df_stds.loc[k]['McClain (1975)'] = stdev(dicio_statistics[k]['mcClain_old'])
+            df_stds.loc[k]['C-index'] = stdev(dicio_statistics[k]['c_index'])
+            df_stds.loc[k]['Silhouette'] = stdev(dicio_statistics[k]['silhouette'])
+            df_stds.loc[k]['Dunn'] = stdev(dicio_statistics[k]['dunn'])
             #df_stds.loc[k]['k_score_std'] = 0
             #df_stds.loc[k]['k_score_std_2'] = 0
 
@@ -114,7 +141,7 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
         #found the maximum value for each clustering index and locate in which k it happens
         # compute the scores for each k as being the sum of weights whenever that k has maximums of clustering indices
         columns = df_avgs.columns
-        analyzed_columns = columns[2:-1]
+        analyzed_columns = columns[2:-6]
         for column in analyzed_columns:
             idx_max = df_avgs[column].idxmax()
             df_avgs.loc[idx_max]['k_score_avg'] = df_avgs.loc[idx_max]['k_score_avg'] + weights[column]
@@ -142,7 +169,8 @@ def final_decision(df_final_decision):
                    'Jaccard':1/4, 'Adjusted Wallace':1/4}
     #found the maximum value for each clustering index and locate in which k it happens
     # compute the scores for each k as being the sum of weights whenever that k has maximums of clustering indices
-    for column in df_final_decision.drop(columns = ['k','Rand','k_score_avg','gap']).columns:
+    for column in df_final_decision.drop(columns = ['k','Rand','k_score_avg','gap', 'McClain (NbClust)','McClain (1975)', 
+                                                    'C-index', 'Silhouette', 'Dunn']).columns:
         idx_max = df_final_decision[column].idxmax()
         df_aux.loc[idx_max]['k_score'] = df_aux.loc[idx_max]['k_score'] + weights[column]
 
