@@ -5,5 +5,5 @@ matplotlib
 scipy
 fastcluster
 statistics
-ray
-fitz
+ray[default]
+pymupdf

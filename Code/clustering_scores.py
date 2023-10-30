@@ -10,7 +10,7 @@ import numpy as np
 import math
 
 
-def cluster_indices(cluster_assignments,idx):
+def sequence_indices_in_clusters(cluster_assignments,idx):
     n = cluster_assignments.max()
     clusters = []
     for cluster_number in range(0, n + 1):

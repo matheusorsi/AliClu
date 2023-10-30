@@ -10,7 +10,7 @@ Created on Tue Jan 30 10:56:45 2018
 import traceback as tb
 from scipy.cluster.hierarchy import cut_tree
 from fastcluster import linkage
-from clustering_scores import cluster_indices, cluster_external_index
+from clustering_scores import sequence_indices_in_clusters, cluster_external_index
 from statistics import mean, stdev
 import pandas as pd
 import numpy as np
@@ -62,9 +62,9 @@ def validation(bootstrapSamples, df_encoded, main_results, main_partition, metho
                 cluster_assignments_original = cut_tree(main_partition, k)
                 cluster_assignments_bootstrap = cut_tree(partitionBootstrap, k)
                 #list of clusters for the clustering result with the original data
-                cluster_indices_original = cluster_indices(cluster_assignments_original,df_encoded.index.tolist())
+                cluster_indices_original = sequence_indices_in_clusters(cluster_assignments_original,df_encoded.index.tolist())
                 #list of clusters for the clustering result with the bootstrap sample
-                cluster_indices_bootstrap = cluster_indices(cluster_assignments_bootstrap,idx)
+                cluster_indices_bootstrap = sequence_indices_in_clusters(cluster_assignments_bootstrap,idx)
 
                 #compute 4 different cluster external indexes between the partitions
                 computed_indexes = cluster_external_index(cluster_indices_original, cluster_indices_bootstrap)

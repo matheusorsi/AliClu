@@ -13,7 +13,7 @@ from sequence_alignment import main_algorithm
 from clustering import convert_to_distance_matrix, hierarchical_clustering
 from hierarchical_validation import validation, final_decision
 from cluster_stability import cluster_validation
-from clustering_scores import cluster_indices
+from clustering_scores import sequence_indices_in_clusters
 from scipy.cluster.hierarchy import cut_tree
 from print_results import print_clusters_csv, print_pdf_images, print_full_analysis
 import traceback as tb
@@ -165,6 +165,7 @@ if __name__ == '__main__':
         #          READ TEMPORAL SEQUENCES
         ###############################################################################
         df_encoded = pd.read_csv(args.filename, sep=',')
+        df_encoded.columns = ['id_patient','aux_encode']
         
         ################################################################################
         ##            SEQUENCE ALIGNMENT, HIERARCHICAL CLUSTERING & VALIDATION
@@ -238,7 +239,7 @@ if __name__ == '__main__':
         #cut the final dendrogram
         c_assignments_found = cut_tree(complete_tree, k)
         #obtain the final partitions
-        partition_found = cluster_indices(c_assignments_found, df_encoded.index.tolist())
+        partition_found = sequence_indices_in_clusters(c_assignments_found, df_encoded.index.tolist())
         partition_found.sort(key = len)
         directory = method + '_gap_' + str(final_gap) + '_Tp_' + str(temporalPenalty) + '_clusters_' + str(k) + '/'
         #print the clusters on a directory in separated csv files

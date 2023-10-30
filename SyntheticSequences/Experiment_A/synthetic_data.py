@@ -61,7 +61,7 @@ def ctmc_sequences(n_events, iDistribution, genMatrix, n_sequences):
                 break
             else:
                 #exponential holding time
-                holdTime = float(np.random.exponential(q_ii, 1))
+                holdTime = float(np.random.exponential(1/q_ii, 1))
                 accTime = accTime + holdTime
                 #next state drawn from the i_th row of the stochastic matrix
                 while True:
