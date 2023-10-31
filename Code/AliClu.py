@@ -125,6 +125,7 @@ if __name__ == '__main__':
     #          READ TEMPORAL SEQUENCES
     ###############################################################################
     df_encoded = pd.read_csv(args.filename,sep=',')
+    df_encoded.columns = ['id_patient','aux_encode']
     ################################################################################
     ##            SEQUENCE ALIGNMENT, HIERARCHICAL CLUSTERING & VALIDATION
     ################################################################################
